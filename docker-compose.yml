@@ -114,6 +114,9 @@ services:
       # ── MQTT: use the Docker service name, not localhost ──────────
       - MQTT_BROKER_HOST=mosquitto
       - MQTT_BROKER_PORT=1883
+      # In Docker Wokwi mode, only Wokwi telemetry is shown as live data.
+      - PYTHON_SIMULATOR_ENABLED=false
+      - LIVE_TELEMETRY_SOURCE=WOKWI_SIMULATED
       # ── InfluxDB: use the Docker service name ─────────────────────
       - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-civictwin-dev-token}

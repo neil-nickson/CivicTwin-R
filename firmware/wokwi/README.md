@@ -85,6 +85,13 @@ telemetry retains `WOKWI_SIMULATED` and the
 Do not add Wokwi project links to this repository until the projects have been
 created and saved in the owner's Wokwi account.
 
+The Docker backend can be placed in Wokwi live mode without changing the
+firmware or broker configuration. In that mode, the dashboard accepts only
+`WOKWI_SIMULATED` telemetry and shows `WAITING FOR WOKWI DATA` until a project
+publishes. Browser Wokwi still needs an explicitly approved connection method;
+do not assume `localhost`, expose the anonymous broker publicly, or commit
+credentials.
+
 ## Simulating Water Levels
 
 - Click the HC-SR04 ultrasonic sensor during simulation.

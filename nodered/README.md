@@ -41,7 +41,14 @@ For Node-RED 4.0+, use the built-in `@flowfuse/node-red-dashboard`.
 
 ## Requirements
 
-The dashboard polls the FastAPI backend API. Start the backend first:
+The dashboard polls the FastAPI backend API. In Docker Wokwi live mode, the
+backend accepts only `WOKWI_SIMULATED` telemetry as the live zone reading.
+Zones without a device packet show `WAITING FOR WOKWI DATA`; stopped devices
+show a stale/offline status with the last telemetry timestamp. Python simulator
+and historical replay records remain available for standalone and replay
+workflows but are not presented as live Wokwi readings.
+
+Start the backend first:
 
 ```bash
 python3 -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000

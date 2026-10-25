@@ -89,7 +89,7 @@ Expected: HTTP 204 (no output, exit 0)
 **Mosquitto — publish a test message:**
 ```bash
 # Requires mosquitto-clients installed on your Mac (brew install mosquitto)
-mosquitto_pub -h localhost -p 1883 -t "civictwin/v1/test" -m "hello"
+mosquitto_pub -h localhost -p 1884 -t "civictwin/v1/test" -m "hello"
 ```
 
 **Node-RED editor:**
@@ -107,7 +107,7 @@ Login: username `admin`, password `civictwin_local`.
 
 ### Step 6 — Verify InfluxDB is receiving telemetry
 
-After the backend has been running for 30+ seconds with the simulator active:
+After the backend has been running for 30+ seconds with telemetry active:
 
 1. Open the InfluxDB UI at [http://localhost:8086](http://localhost:8086)
 2. Go to **Data Explorer**
@@ -163,13 +163,25 @@ Restart at any time with `docker compose up -d`.
 
 ## Connecting Wokwi to the MQTT Broker
 
-### Why `localhost` does not work in Wokwi
+### Why `localhost` does not work in browser Wokwi
 
 Wokwi runs in your browser as a sandboxed simulation. The ESP32 firmware
 uses `MQTT_BROKER = "localhost"`, but inside the Wokwi sandbox `localhost`
 resolves to Wokwi's own servers — **not** your Mac or any Docker container.
 
-### Option A — Use your Mac's LAN IP address (recommended)
+The Docker backend uses `mosquitto:1883` internally. Docker maps the broker to
+Mac port `1884` for local host clients and port `9001` for WebSockets. The
+anonymous local listener must not be exposed publicly.
+
+### Option A — Use an approved local Wokwi forwarding method
+
+The local Wokwi desktop/VS Code workflow may forward the simulated device's
+MQTT connection to the Mac host. If you use that workflow, target the
+host-side broker port `1884`; do not change the Docker service address used by
+the backend. Confirm the forwarding behavior in your chosen Wokwi client
+before changing firmware.
+
+### Option B — Use your Mac's LAN IP address (not guaranteed)
 
 1. Find your Mac's local IP:
    ```bash
@@ -183,12 +195,12 @@ resolves to Wokwi's own servers — **not** your Mac or any Docker container.
    // Before
    const char* MQTT_BROKER = "localhost";
 
-   // After
-   const char* MQTT_BROKER = "192.168.1.105";   // ← your actual LAN IP
+   // After (only after explicit approval)
+   const char* MQTT_BROKER = "192.168.1.105";   // your actual LAN IP
    ```
 
-3. Ensure port 1883 is accessible from your Mac's local network
-   (Docker Desktop exposes it on all interfaces by default on macOS).
+3. Ensure host port 1884 is accessible from your Mac's local network
+   (Docker maps host port 1884 to the broker's container port 1883).
 
 4. Paste the updated sketch into Wokwi and run the simulation.
 
@@ -196,25 +208,11 @@ resolves to Wokwi's own servers — **not** your Mac or any Docker container.
 > can reach the same LAN IP. This is normally true on a home/lab network
 > but may fail on corporate networks with client isolation enabled.
 
-### Option B — Use a public MQTT relay (most reliable for Wokwi)
+### Option C — Use a separately approved secure external MQTT endpoint
 
-Use a public test broker such as `test.mosquitto.org` (port 1883, unauthenticated):
-
-```cpp
-const char* MQTT_BROKER = "test.mosquitto.org";
-```
-
-Your backend subscriber (`backend/ingestion.py`) must also subscribe to
-the same public broker. Set `MQTT_BROKER_HOST=test.mosquitto.org` in your
-`.env` and restart the backend:
-
-```bash
-docker compose restart backend
-```
-
-> **Limitation:** Messages sent to a public broker are visible to everyone.
-> Do not publish sensitive data. The topic prefix `civictwin/v1/` is
-> sufficient to avoid collisions during a demonstration.
+This requires an authenticated, TLS-protected endpoint and explicit approval.
+Do not use an anonymous public broker, enable port forwarding, or place
+credentials in firmware or committed files.
 
 ### MQTT topic contract
 
@@ -262,7 +260,7 @@ In this mode:
 | Node-RED editor | http://localhost:1880 | Flow editor |
 | Node-RED dashboard | http://localhost:1880/ui | Live dashboard |
 | InfluxDB UI | http://localhost:8086 | Time-series explorer |
-| Mosquitto TCP | localhost:1883 | MQTT clients |
+| Mosquitto TCP | localhost:1884 | MQTT clients on the Mac host |
 | Mosquitto WebSocket | localhost:9001 | Browser MQTT clients |
 
 ---

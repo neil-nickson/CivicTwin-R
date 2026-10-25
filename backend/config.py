@@ -24,6 +24,14 @@ MQTT_CLIENT_ID: str = os.getenv("MQTT_CLIENT_ID", "civictwin_backend")
 MQTT_TOPIC_PREFIX: str = os.getenv("MQTT_TOPIC_PREFIX", "civictwin/v1")
 MQTT_QOS: int = 1
 
+# Live telemetry mode
+# Empty LIVE_TELEMETRY_SOURCE preserves standalone behavior. Docker Wokwi mode
+# sets this to WOKWI_SIMULATED so other generated streams cannot appear live.
+PYTHON_SIMULATOR_ENABLED: bool = os.getenv(
+    "PYTHON_SIMULATOR_ENABLED", "true"
+).lower() == "true"
+LIVE_TELEMETRY_SOURCE: str = os.getenv("LIVE_TELEMETRY_SOURCE", "").strip().upper()
+
 # InfluxDB
 INFLUXDB_URL: str = os.getenv("INFLUXDB_URL", "http://localhost:8086")
 INFLUXDB_TOKEN: str = os.getenv("INFLUXDB_TOKEN", "")

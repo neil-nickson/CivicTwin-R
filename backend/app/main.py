@@ -43,6 +43,85 @@ replay_ctrl: Optional[HistoricalReplayController] = None
 forecaster = BaselineForecaster()
 
 
+def _zone_status_for_dashboard(zone_id: str) -> dict:
+    if not ingestion:
+        return {}
+    if config.LIVE_TELEMETRY_SOURCE:
+        return ingestion.live_zone_status.get(zone_id, {})
+    return ingestion.zone_status.get(zone_id, {})
+
+
+def _apply_dashboard_status(state: dict, status: dict) -> dict:
+    live_mode = bool(config.LIVE_TELEMETRY_SOURCE)
+    if not status and live_mode:
+        state["water_level_cm"] = None
+        state["water_level_pct"] = None
+        state["current_level_cm"] = None
+        state["current_level_pct"] = None
+        state["rain_sensor_raw"] = None
+        state["rain_indicator_pct"] = None
+        state["rainfall_measurement_type"] = None
+        state["sensor_status"] = "offline"
+        state["alert_level"] = "normal"
+        state["data_source"] = config.LIVE_TELEMETRY_SOURCE
+        state["device_id"] = None
+        state["telemetry_timestamp"] = None
+        state["ingestion_timestamp"] = None
+        state["last_update"] = None
+        state["is_stale"] = False
+        state["live_data_state"] = "WAITING_FOR_WOKWI_DATA"
+        return state
+
+    state["water_level_cm"] = status.get(
+        "water_level_cm", state.get("current_level_cm", 0.0)
+    )
+    state["water_level_pct"] = status.get(
+        "water_level_pct", state.get("current_level_pct", 0.0)
+    )
+    state["current_level_cm"] = state["water_level_cm"]
+    state["current_level_pct"] = state["water_level_pct"]
+    state["rain_sensor_raw"] = status.get("rain_sensor_raw")
+    state["rain_indicator_pct"] = status.get("rain_indicator_pct")
+    state["rainfall_measurement_type"] = status.get("rainfall_measurement_type")
+    state["sensor_status"] = status.get("sensor_status", "valid")
+    state["alert_level"] = status.get("alert_level", "normal")
+    state["data_source"] = status.get(
+        "source", config.LIVE_TELEMETRY_SOURCE or "DIGITAL_TWIN"
+    )
+    state["device_id"] = status.get("device_id")
+    state["telemetry_timestamp"] = status.get("telemetry_timestamp")
+    state["ingestion_timestamp"] = status.get("ingestion_timestamp")
+    state["last_update"] = status.get("last_update")
+    state["is_stale"] = status.get("is_stale", False)
+
+    if live_mode:
+        telemetry_timestamp = status.get("telemetry_timestamp")
+        stale = False
+        if telemetry_timestamp:
+            try:
+                observed_at = datetime.fromisoformat(
+                    telemetry_timestamp.replace("Z", "+00:00")
+                )
+                stale = (
+                    datetime.now(timezone.utc) - observed_at
+                    > timedelta(seconds=config.STALE_READING_TIMEOUT_SEC)
+                )
+            except ValueError:
+                logger.warning("Invalid telemetry timestamp for %s", state["zone_id"])
+                stale = True
+        else:
+            stale = True
+        state["is_stale"] = stale
+        if stale:
+            state["sensor_status"] = "stale"
+            state["live_data_state"] = "STALE_WOKWI_DATA"
+        else:
+            state["live_data_state"] = "LIVE_WOKWI_DATA"
+    else:
+        state["live_data_state"] = "CURRENT_DATA"
+    return state
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global storage, ingestion, mqtt_client, simulator, twin_engine, scenario_ctrl, replay_ctrl
@@ -63,12 +142,16 @@ async def lifespan(app: FastAPI):
     if not mqtt_connected:
         logger.info("MQTT broker not reached; continuing in standalone simulation mode")
 
-    simulator = SensorSimulator(
-        engine=twin_engine,
-        direct_callback=ingestion.process_message,
-        interval_sec=config.TWIN_TIME_STEP_SEC,
-    )
-    simulator.start()
+    if config.PYTHON_SIMULATOR_ENABLED:
+        simulator = SensorSimulator(
+            engine=twin_engine,
+            direct_callback=ingestion.process_message,
+            interval_sec=config.TWIN_TIME_STEP_SEC,
+        )
+        simulator.start()
+    else:
+        simulator = None
+        logger.info("Python sensor simulator disabled by configuration")
 
     replay_ctrl = HistoricalReplayController(callback=ingestion.process_message)
 
@@ -113,7 +196,7 @@ def health():
         "storage_configured": config.STORAGE_BACKEND,
         "storage_fallback_active": is_fallback,
         "mqtt_connected": mqtt_client.is_connected if mqtt_client else False,
-        "simulator_running": simulator is not None,
+        "simulator_running": simulator is not None and simulator._running,
         "records_stored": storage.count() if storage else 0,
         "ingestion": ingestion.get_health() if ingestion else {},
     }
@@ -130,23 +213,10 @@ def get_zones():
         raise HTTPException(503, "Digital twin engine not initialized")
 
     states = twin_engine.get_all_states()
-    zone_statuses = ingestion.zone_status if ingestion else {}
-
     for state in states:
         zid = state["zone_id"]
-        status = zone_statuses.get(zid, {})
-        state["water_level_cm"] = status.get("water_level_cm", state.get("current_level_cm", 0.0))
-        state["water_level_pct"] = status.get("water_level_pct", state.get("current_level_pct", 0.0))
-        state["current_level_cm"] = state["water_level_cm"]
-        state["current_level_pct"] = state["water_level_pct"]
-        state["rain_sensor_raw"] = status.get("rain_sensor_raw")
-        state["rain_indicator_pct"] = status.get("rain_indicator_pct")
-        state["rainfall_measurement_type"] = status.get("rainfall_measurement_type")
-        state["sensor_status"] = status.get("sensor_status", "valid")
-        state["alert_level"] = status.get("alert_level", "normal")
+        state = _apply_dashboard_status(state, _zone_status_for_dashboard(zid))
         state["zone_type"] = "virtual"
-        state["data_source"] = status.get("source", "DIGITAL_TWIN")
-        state["is_stale"] = status.get("is_stale", False)
 
     return {"zones": states, "count": len(states)}
 
@@ -160,20 +230,8 @@ def get_zone(zone_id: str):
     if not state:
         raise HTTPException(404, f"Zone '{zone_id}' not found")
 
-    zone_statuses = ingestion.zone_status if ingestion else {}
-    status = zone_statuses.get(zone_id, {})
-    state["water_level_cm"] = status.get("water_level_cm", state.get("current_level_cm", 0.0))
-    state["water_level_pct"] = status.get("water_level_pct", state.get("current_level_pct", 0.0))
-    state["current_level_cm"] = state["water_level_cm"]
-    state["current_level_pct"] = state["water_level_pct"]
-    state["rain_sensor_raw"] = status.get("rain_sensor_raw")
-    state["rain_indicator_pct"] = status.get("rain_indicator_pct")
-    state["rainfall_measurement_type"] = status.get("rainfall_measurement_type")
-    state["sensor_status"] = status.get("sensor_status", "valid")
-    state["alert_level"] = status.get("alert_level", "normal")
+    state = _apply_dashboard_status(state, _zone_status_for_dashboard(zone_id))
     state["zone_type"] = "virtual"
-    state["data_source"] = status.get("source", "DIGITAL_TWIN")
-    state["is_stale"] = status.get("is_stale", False)
 
     return state
 

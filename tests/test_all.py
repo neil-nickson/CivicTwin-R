@@ -38,7 +38,7 @@ from backend.models import (
 )
 from backend.storage import MemoryStorage, SQLiteStorage, create_storage
 from backend.ingestion import IngestionService
-from backend.app.main import app
+from backend.app.main import app, _apply_dashboard_status
 from backend import config
 
 
@@ -918,6 +918,73 @@ class TestProvenanceAndSensorVerification:
         stored_sources = {r["source"] for r in stored_records}
         for tag in canonical_tags:
             assert tag.value in stored_sources
+
+    def test_live_zone_status_accepts_only_configured_wokwi_source(self, monkeypatch):
+        monkeypatch.setattr(config, "LIVE_TELEMETRY_SOURCE", "WOKWI_SIMULATED")
+        storage = MemoryStorage()
+        ingestion = IngestionService(storage=storage)
+        timestamp = datetime.now(timezone.utc)
+
+        ingestion.process_message({
+            "device_id": "python_zone_01", "zone_id": "zone_01", "sequence": 1,
+            "timestamp": timestamp.isoformat(), "water_level_pct": 20.0,
+            "source": "PYTHON_SIMULATED",
+        })
+        assert ingestion.live_zone_status == {}
+
+        ingestion.process_message({
+            "device_id": "node_adyar_01", "zone_id": "zone_01", "sequence": 1,
+            "timestamp": timestamp.isoformat(), "water_level_pct": 40.0,
+            "source": "WOKWI_SIMULATED",
+        })
+        assert ingestion.live_zone_status["zone_01"]["source"] == "WOKWI_SIMULATED"
+        assert ingestion.live_zone_status["zone_01"]["device_id"] == "node_adyar_01"
+
+    def test_live_status_retains_telemetry_timestamp(self):
+        storage = MemoryStorage()
+        ingestion = IngestionService(storage=storage)
+        timestamp = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
+        record = ingestion.process_message({
+            "device_id": "node_adyar_01", "zone_id": "zone_01", "sequence": 1,
+            "timestamp": timestamp.isoformat(), "water_level_pct": 40.0,
+            "source": "WOKWI_SIMULATED",
+        })
+        assert record is not None
+        status = ingestion.zone_status["zone_01"]
+        assert status["telemetry_timestamp"] == timestamp.isoformat()
+        assert status["ingestion_timestamp"]
+
+    def test_wokwi_dashboard_waits_without_live_data(self, monkeypatch):
+        monkeypatch.setattr(config, "LIVE_TELEMETRY_SOURCE", "WOKWI_SIMULATED")
+        state = {"zone_id": "zone_02", "current_level_cm": 12.0, "current_level_pct": 40.0}
+
+        result = _apply_dashboard_status(state, {})
+
+        assert result["live_data_state"] == "WAITING_FOR_WOKWI_DATA"
+        assert result["water_level_pct"] is None
+        assert result["sensor_status"] == "offline"
+
+    def test_wokwi_dashboard_marks_old_measurement_stale(self, monkeypatch):
+        monkeypatch.setattr(config, "LIVE_TELEMETRY_SOURCE", "WOKWI_SIMULATED")
+        old_timestamp = (
+            datetime.now(timezone.utc)
+            - timedelta(seconds=config.STALE_READING_TIMEOUT_SEC + 1)
+        ).isoformat()
+        state = {"zone_id": "zone_03"}
+        status = {
+            "device_id": "node_kosasthalaiyar_01",
+            "source": "WOKWI_SIMULATED",
+            "water_level_cm": 10.0,
+            "water_level_pct": 33.3,
+            "telemetry_timestamp": old_timestamp,
+            "last_update": old_timestamp,
+        }
+
+        result = _apply_dashboard_status(state, status)
+
+        assert result["live_data_state"] == "STALE_WOKWI_DATA"
+        assert result["sensor_status"] == "stale"
+        assert result["is_stale"] is True
 
     def test_provenance_alias_normalization(self):
         """Verify legacy/lowercase source aliases normalize to canonical uppercase tags."""

@@ -32,6 +32,7 @@ class IngestionService:
         self._seen_sequences: dict[str, int] = {}
         self._last_timestamps: dict[str, datetime] = {}
         self._zone_status: dict[str, dict] = {}
+        self._live_zone_status: dict[str, dict] = {}
         self._zone_alert_states: dict[str, AlertLevel] = {}
         self._alerts: list[Alert] = []
         self._stats = {
@@ -60,6 +61,11 @@ class IngestionService:
     def zone_status(self) -> dict:
         with self._lock:
             return dict(self._zone_status)
+
+    @property
+    def live_zone_status(self) -> dict:
+        with self._lock:
+            return dict(self._live_zone_status)
 
     def add_callback(self, cb: Callable):
         self._callbacks.append(cb)
@@ -150,7 +156,7 @@ class IngestionService:
     def _update_zone_status(self, record: IngestedTelemetry):
         with self._lock:
             alert_level = self._zone_alert_states.get(record.zone_id, AlertLevel.NORMAL)
-            self._zone_status[record.zone_id] = {
+            status = {
                 "zone_id": record.zone_id,
                 "device_id": record.device_id,
                 "sensor_status": record.sensor_status.value,
@@ -167,10 +173,18 @@ class IngestionService:
                 ),
                 "alert_level": alert_level.value,
                 "source": record.source.value,
-                "last_update": record.ingestion_timestamp.isoformat(),
+                "telemetry_timestamp": record.timestamp.isoformat(),
+                "ingestion_timestamp": record.ingestion_timestamp.isoformat(),
+                "last_update": record.timestamp.isoformat(),
                 "is_stale": record.is_stale,
                 "quality_flags": record.quality_flags,
             }
+            self._zone_status[record.zone_id] = status
+            if (
+                config.LIVE_TELEMETRY_SOURCE
+                and record.source.value == config.LIVE_TELEMETRY_SOURCE
+            ):
+                self._live_zone_status[record.zone_id] = status
 
     def _check_thresholds(self, record: IngestedTelemetry):
         if record.water_level_pct is None:
