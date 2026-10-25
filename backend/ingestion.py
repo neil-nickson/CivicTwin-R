@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import threading
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Callable
@@ -263,18 +264,29 @@ class MQTTIngestionClient:
         self._connected = False
         self._topic_prefix = config.MQTT_TOPIC_PREFIX
 
+    def _configure_tls(self, client) -> None:
+        if not config.MQTT_TLS_ENABLED:
+            return
+
+        if config.MQTT_TLS_CA_FILE:
+            tls_context = ssl.create_default_context(cafile=config.MQTT_TLS_CA_FILE)
+        else:
+            tls_context = ssl.create_default_context()
+        client.tls_set_context(tls_context)
+
     def start(self) -> bool:
         try:
             import paho.mqtt.client as mqtt
 
             self._client = mqtt.Client(
                 mqtt.CallbackAPIVersion.VERSION2,
-                client_id=config.MQTT_CLIENT_ID + "_ingestion",
+                client_id=config.MQTT_CLIENT_ID,
             )
 
             if config.MQTT_USERNAME:
                 self._client.username_pw_set(config.MQTT_USERNAME, config.MQTT_PASSWORD)
 
+            self._configure_tls(self._client)
             self._client.on_connect = self._on_connect
             self._client.on_disconnect = self._on_disconnect
             self._client.on_message = self._on_message

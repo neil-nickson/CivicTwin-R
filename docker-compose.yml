@@ -111,9 +111,14 @@ services:
     ports:
       - "8000:8000"   # FastAPI — reachable from Mac at localhost:8000
     environment:
-      # ── MQTT: use the Docker service name, not localhost ──────────
-      - MQTT_BROKER_HOST=mosquitto
-      - MQTT_BROKER_PORT=1883
+      # ── MQTT: values come from the root .env file ────────────────
+      - MQTT_BROKER_HOST=${MQTT_BROKER_HOST}
+      - MQTT_BROKER_PORT=${MQTT_BROKER_PORT}
+      - MQTT_USERNAME=${MQTT_USERNAME}
+      - MQTT_PASSWORD=${MQTT_PASSWORD}
+      - MQTT_CLIENT_ID=${MQTT_CLIENT_ID}
+      - MQTT_TLS_ENABLED=${MQTT_TLS_ENABLED}
+      - MQTT_TLS_CA_FILE=${MQTT_TLS_CA_FILE}
       # In Docker Wokwi mode, only Wokwi telemetry is shown as live data.
       - PYTHON_SIMULATOR_ENABLED=false
       - LIVE_TELEMETRY_SOURCE=WOKWI_SIMULATED

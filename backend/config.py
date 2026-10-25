@@ -21,6 +21,8 @@ MQTT_BROKER_PORT: int = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 MQTT_USERNAME: str = os.getenv("MQTT_USERNAME", "")
 MQTT_PASSWORD: str = os.getenv("MQTT_PASSWORD", "")
 MQTT_CLIENT_ID: str = os.getenv("MQTT_CLIENT_ID", "civictwin_backend")
+MQTT_TLS_ENABLED: bool = os.getenv("MQTT_TLS_ENABLED", "false").lower() == "true"
+MQTT_TLS_CA_FILE: str = os.getenv("MQTT_TLS_CA_FILE", "")
 MQTT_TOPIC_PREFIX: str = os.getenv("MQTT_TOPIC_PREFIX", "civictwin/v1")
 MQTT_QOS: int = 1
 
@@ -85,6 +87,7 @@ def summary() -> dict:
     return {
         "mqtt_broker": f"{MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}",
         "mqtt_auth": "configured" if MQTT_USERNAME else "none",
+        "mqtt_tls": MQTT_TLS_ENABLED,
         "storage_backend": STORAGE_BACKEND,
         "influxdb_enabled": INFLUXDB_ENABLED,
         "api_bind": f"{API_HOST}:{API_PORT}",

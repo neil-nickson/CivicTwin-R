@@ -40,6 +40,23 @@ The only value you may want to change is `INFLUXDB_TOKEN` — use any non-empty 
 the same value must appear in both `INFLUXDB_TOKEN` and `DOCKER_INFLUXDB_INIT_ADMIN_TOKEN`
 (the Compose file passes `$INFLUXDB_TOKEN` to both, so they stay in sync automatically).
 
+For the EMQX Cloud backend connection, edit only the local, Git-ignored `.env`
+and set the MQTT values from `.env.example`:
+
+```text
+MQTT_BROKER_HOST=wfde4d21.ala.asia-southeast1.emqxsl.com
+MQTT_BROKER_PORT=8883
+MQTT_USERNAME=civictwin_backend
+MQTT_PASSWORD=<your EMQX password>
+MQTT_CLIENT_ID=civictwin_backend_01
+MQTT_TLS_ENABLED=true
+MQTT_TLS_CA_FILE=
+```
+
+Leaving `MQTT_TLS_CA_FILE` empty uses Python's default trusted CA certificates
+with hostname verification enabled. Do not disable certificate verification,
+put the password in tracked files, or change the local Mosquitto service.
+
 ### Step 3 — Start all services
 
 ```bash

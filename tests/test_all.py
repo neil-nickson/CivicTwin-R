@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+import ssl
 import sys
 import tempfile
+import types
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -37,7 +39,7 @@ from backend.models import (
     DataSource, AlertLevel, ZoneConfig, ZoneState,
 )
 from backend.storage import MemoryStorage, SQLiteStorage, create_storage
-from backend.ingestion import IngestionService
+from backend.ingestion import IngestionService, MQTTIngestionClient
 from backend.app.main import app, _apply_dashboard_status
 from backend import config
 
@@ -986,6 +988,7 @@ class TestProvenanceAndSensorVerification:
         assert result["sensor_status"] == "stale"
         assert result["is_stale"] is True
 
+
     def test_provenance_alias_normalization(self):
         """Verify legacy/lowercase source aliases normalize to canonical uppercase tags."""
         test_cases = [
@@ -1139,3 +1142,86 @@ class TestProvenanceAndSensorVerification:
         })
         assert len(svc.alerts) == 4
         assert svc.alerts[-1].alert_level == AlertLevel.NORMAL
+
+
+class TestMQTTCloudConfiguration:
+    def test_tls_context_uses_verified_defaults(self, monkeypatch):
+        monkeypatch.setattr(config, "MQTT_TLS_ENABLED", True)
+        monkeypatch.setattr(config, "MQTT_TLS_CA_FILE", "")
+        client = types.SimpleNamespace()
+        captured = {}
+        client.tls_set_context = lambda context: captured.setdefault("context", context)
+
+        MQTTIngestionClient(IngestionService(MemoryStorage()))._configure_tls(client)
+
+        context = captured["context"]
+        assert isinstance(context, ssl.SSLContext)
+        assert context.verify_mode == ssl.CERT_REQUIRED
+        assert context.check_hostname is True
+
+    def test_cloud_client_uses_exact_configured_id_and_tls(self, monkeypatch):
+        class FakeClient:
+            instance = None
+
+            def __init__(self, api_version, client_id):
+                self.client_id = client_id
+                self.tls_context = None
+                self.username = None
+                self.on_connect = None
+                self.on_disconnect = None
+                self.on_message = None
+                FakeClient.instance = self
+
+            def username_pw_set(self, username, password):
+                self.username = (username, password)
+
+            def tls_set_context(self, context):
+                self.tls_context = context
+
+            def connect_async(self, host, port):
+                self.endpoint = (host, port)
+
+            def subscribe(self, topic, qos):
+                self.subscription = (topic, qos)
+
+            def loop_start(self):
+                pass
+
+        mqtt_client_module = types.ModuleType("paho.mqtt.client")
+        mqtt_client_module.CallbackAPIVersion = types.SimpleNamespace(VERSION2=2)
+        mqtt_client_module.Client = FakeClient
+        mqtt_package = types.ModuleType("paho.mqtt")
+        mqtt_package.client = mqtt_client_module
+        paho_package = types.ModuleType("paho")
+        paho_package.mqtt = mqtt_package
+        monkeypatch.setitem(sys.modules, "paho", paho_package)
+        monkeypatch.setitem(sys.modules, "paho.mqtt", mqtt_package)
+        monkeypatch.setitem(sys.modules, "paho.mqtt.client", mqtt_client_module)
+
+        monkeypatch.setattr(config, "MQTT_BROKER_HOST", "cloud.example")
+        monkeypatch.setattr(config, "MQTT_BROKER_PORT", 8883)
+        monkeypatch.setattr(config, "MQTT_USERNAME", "civictwin_backend")
+        monkeypatch.setattr(config, "MQTT_PASSWORD", "test-only-placeholder")
+        monkeypatch.setattr(config, "MQTT_CLIENT_ID", "civictwin_backend_01")
+        monkeypatch.setattr(config, "MQTT_TLS_ENABLED", True)
+        monkeypatch.setattr(config, "MQTT_TLS_CA_FILE", "")
+
+        started = MQTTIngestionClient(IngestionService(MemoryStorage())).start()
+
+        assert started is True
+        assert FakeClient.instance.client_id == "civictwin_backend_01"
+        assert FakeClient.instance.endpoint == ("cloud.example", 8883)
+        assert FakeClient.instance.username == (
+            "civictwin_backend",
+            "test-only-placeholder",
+        )
+        assert FakeClient.instance.tls_context.verify_mode == ssl.CERT_REQUIRED
+        assert FakeClient.instance.tls_context.check_hostname is True
+
+        ingestion_client = MQTTIngestionClient(IngestionService(MemoryStorage()))
+        ingestion_client._client = FakeClient.instance
+        ingestion_client._on_connect(FakeClient.instance, None, None, 0)
+        assert FakeClient.instance.subscription == (
+            "civictwin/v1/zones/+/telemetry",
+            config.MQTT_QOS,
+        )
