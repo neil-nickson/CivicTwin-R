@@ -34,7 +34,7 @@ services:
     image: eclipse-mosquitto:2.0
     container_name: civictwin-mosquitto
     ports:
-      - "1883:1883"   # MQTT TCP — reachable from Mac and LAN
+      - "1884:1883"   # MQTT TCP — reachable from Mac and LAN
       - "9001:9001"   # MQTT WebSocket — for browser-based clients
     volumes:
       - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
