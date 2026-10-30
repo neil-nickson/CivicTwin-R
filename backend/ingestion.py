@@ -313,9 +313,25 @@ class MQTTIngestionClient:
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
             self._connected = True
-            topic = f"{self._topic_prefix}/zones/+/telemetry"
-            client.subscribe(topic, qos=config.MQTT_QOS)
-            logger.info("MQTT connected, subscribed to %s", topic)
+            topics = (
+                f"{self._topic_prefix}/zones/+/telemetry",
+                f"{self._topic_prefix}/zones/+/status",
+                f"{self._topic_prefix}/zones/+/alerts",
+            )
+            subscription_failed = False
+            for topic in topics:
+                result = client.subscribe(topic, qos=config.MQTT_QOS)
+                if isinstance(result, tuple):
+                    result = result[0]
+                if result is None:
+                    result = 0
+                if result != 0:
+                    subscription_failed = True
+                    logger.error("MQTT subscription failed for %s with code %s", topic, result)
+            if not subscription_failed:
+                logger.info(
+                    "MQTT connected, subscribed to telemetry, status, and alerts"
+                )
         else:
             logger.error("MQTT connection failed with code %s", reason_code)
 
@@ -324,4 +340,9 @@ class MQTTIngestionClient:
         logger.warning("MQTT disconnected (rc=%s)", reason_code)
 
     def _on_message(self, client, userdata, msg):
-        self._ingestion.process_raw(msg.topic, msg.payload)
+        if msg.topic.endswith("/telemetry"):
+            self._ingestion.process_raw(msg.topic, msg.payload)
+        elif msg.topic.endswith("/status") or msg.topic.endswith("/alerts"):
+            logger.debug("Received device %s message on %s", msg.topic.rsplit("/", 1)[-1], msg.topic)
+        else:
+            logger.warning("Ignoring unexpected MQTT topic: %s", msg.topic)

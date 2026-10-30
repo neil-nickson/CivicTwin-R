@@ -1167,6 +1167,7 @@ class TestMQTTCloudConfiguration:
                 self.client_id = client_id
                 self.tls_context = None
                 self.username = None
+                self.subscriptions = []
                 self.on_connect = None
                 self.on_disconnect = None
                 self.on_message = None
@@ -1182,7 +1183,7 @@ class TestMQTTCloudConfiguration:
                 self.endpoint = (host, port)
 
             def subscribe(self, topic, qos):
-                self.subscription = (topic, qos)
+                self.subscriptions.append((topic, qos))
 
             def loop_start(self):
                 pass
@@ -1221,7 +1222,8 @@ class TestMQTTCloudConfiguration:
         ingestion_client = MQTTIngestionClient(IngestionService(MemoryStorage()))
         ingestion_client._client = FakeClient.instance
         ingestion_client._on_connect(FakeClient.instance, None, None, 0)
-        assert FakeClient.instance.subscription == (
-            "civictwin/v1/zones/+/telemetry",
-            config.MQTT_QOS,
-        )
+        assert FakeClient.instance.subscriptions == [
+            ("civictwin/v1/zones/+/telemetry", config.MQTT_QOS),
+            ("civictwin/v1/zones/+/status", config.MQTT_QOS),
+            ("civictwin/v1/zones/+/alerts", config.MQTT_QOS),
+        ]

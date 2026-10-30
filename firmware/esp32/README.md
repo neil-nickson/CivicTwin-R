@@ -60,12 +60,12 @@ $$\text{Water Level (\%)} = 100 \times \frac{\text{Water Depth (cm)}}{\text{Cont
 
 | Constant | Default | Description |
 |---|---|---|
-| `DEVICE_ID` | `"node_01"` | Edge sensor node identifier |
+| `DEVICE_ID` | `"node_adyar_01"` | Edge sensor node identifier |
 | `ZONE_ID` | `"zone_01"` | Associated study zone (`zone_adyar`) |
 | `DATA_SOURCE` | `"WOKWI_SIMULATED"` | Telemetry data provenance tag |
 | `WIFI_SSID` | `"Wokwi-GUEST"` | Wi-Fi network SSID |
-| `MQTT_BROKER` | `"localhost"` | MQTT broker hostname/IP |
-| `MQTT_PORT` | `1883` | MQTT broker port |
+| `MQTT_BROKER` | `"wfde4d21.ala.asia-southeast1.emqxsl.com"` | EMQX Cloud hostname |
+| `MQTT_PORT` | `8883` | MQTT over TLS port |
 | `CONTAINER_HEIGHT_CM`| `30.0` | Channel reference container height (cm) |
 | `READ_INTERVAL_MS` | `5000` | Sensor sampling interval (5 seconds) |
 | `WARN_THRESHOLD_PCT` | `70.0` | Warning alert trigger (%) |
@@ -79,7 +79,10 @@ $$\text{Water Level (\%)} = 100 \times \frac{\text{Water Depth (cm)}}{\text{Cont
 2. Replace `diagram.json` with `firmware/wokwi/diagram.json`.
 3. Paste `firmware/esp32/src/main.ino` into the code editor.
 4. Click **Start Simulation**.
-5. Drag the HC-SR04 distance slider:
+5. In the Serial Monitor, confirm `[MQTT] Connected`. Wokwi's public gateway
+   provides internet access for the simulation, but does not provide access to
+   your local Docker broker. A valid local EMQX device password is required.
+6. Drag the HC-SR04 distance slider:
    - High distance (e.g. 28 cm) $\rightarrow$ low water level ($2\text{ cm} \approx 6.7\%$).
    - Low distance (e.g. 5 cm) $\rightarrow$ high water level ($25\text{ cm} \approx 83.3\%$, Warning Alert + LED ON).
    - Very low distance (e.g. 3 cm) $\rightarrow$ critical water level ($27\text{ cm} \approx 90.0\%$, Critical Alert + LED ON).

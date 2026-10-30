@@ -3,7 +3,7 @@
  * Water-Level Monitoring with HC-SR04 Ultrasonic Sensor
  *
  * Reads distance from an HC-SR04 sensor, calculates water depth,
- * evaluates local thresholds with hysteresis, and publishes telemetry over MQTT.
+ * evaluates local thresholds with hysteresis, and publishes telemetry over MQTT/TLS.
  *
  * Pin Connections:
  *   HC-SR04 TRIG -> GPIO 5
@@ -14,6 +14,7 @@
  */
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
@@ -29,15 +30,41 @@
 const char* WIFI_SSID     = "Wokwi-GUEST";
 const char* WIFI_PASSWORD = "";
 
-// MQTT Broker Configuration
-// Keep these values unchanged until a broker connectivity method is approved.
-const char* MQTT_BROKER    = "localhost";
-const int   MQTT_PORT      = 1883;
-const char* MQTT_USER      = "";
-const char* MQTT_PASS      = "";
+// EMQX Cloud MQTT/TLS configuration.
+const char* MQTT_BROKER = "wfde4d21.ala.asia-southeast1.emqxsl.com";
+const int   MQTT_PORT = 8883;
+const char* MQTT_USER = "civictwin_device";
+// Replace locally with the dedicated EMQX device password. Never commit it.
+const char* MQTT_PASS = "REPLACE_WITH_EMQX_DEVICE_PASSWORD";
+const char* MQTT_CLIENT_ID = "civictwin_adyar_01";
+// DigiCert Global Root G2, which signs the EMQX Cloud endpoint certificate.
+// Do not replace this with setInsecure() or disable certificate validation.
+const char* EMQX_ROOT_CA_CERTIFICATE = R"_CERT(
+-----BEGIN CERTIFICATE-----
+MIIDjjCCAnagAwIBAgIQAzrx5qcRqaC7KGSxHQn65TANBgkqhkiG9w0BAQsFADBh
+MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
+d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBH
+MjAeFw0xMzA4MDExMjAwMDBaFw0zODAxMTUxMjAwMDBaMGExCzAJBgNVBAYTAlVT
+MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j
+b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IEcyMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuzfNNNx7a8myaJCtSnX/RrohCgiN9RlUyfuI
+2/Ou8jqJkTx65qsGGmvPrC3oXgkkRLpimn7Wo6h+4FR1IAWsULecYxpsMNzaHxmx
+1x7e/dfgy5SDN67sH0NO3Xss0r0upS/kqbitOtSZpLYl6ZtrAGCSYP9PIUkY92eQ
+q2EGnI/yuum06ZIya7XzV+hdG82MHauVBJVJ8zUtluNJbd134/tJS7SsVQepj5Wz
+tCO7TG1F8PapspUwtP1MVYwnSlcUfIKdzXOS0xZKBgyMUNGPHgm+F6HmIcr9g+UQ
+vIOlCsRnKPZzFBQ9RnbDhxSJITRNrw9FDKZJobq7nMWxM4MphQIDAQABo0IwQDAP
+BgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAdBgNVHQ4EFgQUTiJUIBiV
+5uNu5g/6+rkS7QYXjzkwDQYJKoZIhvcNAQELBQADggEBAGBnKJRvDkhj6zHd6mcY
+1Yl9PMWLSn/pvtsrF9+wX3N3KjITOYFnQoQj8kVnNeyIv/iPsGEMNKSuIEyExtv4
+NeF22d+mQrvHRAiGfzZ0JFrabA0UWTW98kndth/Jsw1HKj2ZL7tcu7XUIOGZX1NG
+Fdtom/DzMNU+MeKNhJ7jitralj41E6Vf8PlwUHBHQRFXGU7Aj64GxJUTFy8bJZ91
+8rGOmaFvE7FBcf6IKshPECBV1/MUReXgRPTqh5Uykw7+U0b6LJ3/iyK5S9kJRaTe
+pLiaWN0bfVKfjllDiIGknibVb63dDcY3fe0Dkhvld1927jyNxF1WW6LZZm6zNTfl
+MrY=
+-----END CERTIFICATE-----
+)_CERT";
 
 // Per-project identity
-const char* MQTT_CLIENT_ID = "civictwin_adyar_01";
 const char* DEVICE_ID      = "node_adyar_01";
 #define ZONE_ID "zone_01"
 
@@ -82,9 +109,6 @@ const float CRIT_THRESHOLD_PCT = 85.0;
 const float HYSTERESIS_PCT     = 3.0;
 const int   FILTER_READINGS    = 5;
 
-WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
-
 unsigned long lastReadTime    = 0;
 unsigned long lastStatusTime  = 0;
 unsigned long sequence        = 0;
@@ -94,9 +118,30 @@ float         lastValidLevel  = -1.0;
 int           failedReadings  = 0;
 const int     MAX_FAILED      = 5;
 
+WiFiClientSecure mqttTlsClient;
+PubSubClient mqttClient(mqttTlsClient);
+
 int readRainSensorRaw() {
     int raw = analogRead(RAIN_SENSOR_PIN);
     return constrain(raw, RAIN_ADC_MIN, RAIN_ADC_MAX);
+}
+
+void connectMQTT() {
+    if (mqttClient.connected()) {
+        mqttConnected = true;
+        return;
+    }
+
+    Serial.printf("[MQTT] Connecting to %s:%d...\n", MQTT_BROKER, MQTT_PORT);
+    bool connected = mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS);
+
+    if (connected) {
+        mqttConnected = true;
+        Serial.println("[MQTT] Connected");
+    } else {
+        mqttConnected = false;
+        Serial.printf("[MQTT] Connect failed (rc=%d)\n", mqttClient.state());
+    }
 }
 
 float rainIndicatorPct(int raw) {
@@ -164,30 +209,6 @@ void connectWiFi() {
         configTime(0, 0, "pool.ntp.org");
     } else {
         Serial.println("\n[WiFi] Connection timeout; will retry");
-    }
-}
-
-void connectMQTT() {
-    if (mqttClient.connected()) {
-        mqttConnected = true;
-        return;
-    }
-
-    Serial.printf("[MQTT] Connecting to %s:%d...\n", MQTT_BROKER, MQTT_PORT);
-
-    bool connected;
-    if (strlen(MQTT_USER) > 0) {
-        connected = mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS);
-    } else {
-        connected = mqttClient.connect(MQTT_CLIENT_ID);
-    }
-
-    if (connected) {
-        mqttConnected = true;
-        Serial.println("[MQTT] Connected");
-    } else {
-        mqttConnected = false;
-        Serial.printf("[MQTT] Connect failed (rc=%d)\n", mqttClient.state());
     }
 }
 
@@ -260,7 +281,9 @@ void publishAlert(const char* level, float waterPct) {
     serializeJson(doc, payload, sizeof(payload));
 
     if (mqttConnected && mqttClient.connected()) {
-        mqttClient.publish(TOPIC_ALERTS, payload);
+        if (!mqttClient.publish(TOPIC_ALERTS, payload)) {
+            Serial.println("[TX] Alert publish failed");
+        }
     }
     Serial.printf("[ALERT] %s: water level at %.1f%%\n", level, waterPct);
 }
@@ -301,6 +324,7 @@ void setup() {
 
     connectWiFi();
 
+    mqttTlsClient.setCACert(EMQX_ROOT_CA_CERTIFICATE);
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
     mqttClient.setBufferSize(512);
     connectMQTT();
@@ -358,7 +382,6 @@ void loop() {
 
     if (now - lastStatusTime >= STATUS_INTERVAL_MS) {
         lastStatusTime = now;
-
         JsonDocument doc;
         doc["device_id"]   = DEVICE_ID;
         doc["wifi"]        = WiFi.status() == WL_CONNECTED;
@@ -372,7 +395,9 @@ void loop() {
         serializeJson(doc, payload, sizeof(payload));
 
         if (mqttConnected && mqttClient.connected()) {
-            mqttClient.publish(TOPIC_STATUS, payload);
+            if (!mqttClient.publish(TOPIC_STATUS, payload)) {
+                Serial.println("[TX] Status publish failed");
+            }
         }
         Serial.printf("[STATUS] uptime=%lus seq=%lu alert=%s heap=%u\n",
                       millis() / 1000, sequence, currentAlert.c_str(), ESP.getFreeHeap());

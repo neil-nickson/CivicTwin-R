@@ -88,8 +88,11 @@ created and saved in the owner's Wokwi account.
 The Docker backend can be placed in Wokwi live mode without changing the
 firmware or broker configuration. In that mode, the dashboard accepts only
 `WOKWI_SIMULATED` telemetry and shows `WAITING FOR WOKWI DATA` until a project
-publishes. Browser Wokwi still needs an explicitly approved connection method;
-do not assume `localhost`, expose the anonymous broker publicly, or commit
+publishes. The canonical firmware uses the externally reachable EMQX Cloud
+endpoint over TLS, so browser Wokwi can connect directly when its simulated
+Wi-Fi has internet access. This must be verified by observing `[MQTT] Connected`
+in the Wokwi Serial Monitor and a new record in the backend health/API output.
+Do not use `localhost`, expose the anonymous Docker broker publicly, or commit
 credentials.
 
 ## Simulating Water Levels
@@ -107,19 +110,19 @@ credentials.
 
 ## MQTT Connectivity
 
-The firmware currently keeps the broker configuration unchanged:
+The canonical firmware is configured for direct EMQX Cloud MQTT over TLS:
 
 ```text
-MQTT_BROKER = "localhost"
-MQTT_PORT = 1883
+MQTT_BROKER = "wfde4d21.ala.asia-southeast1.emqxsl.com"
+MQTT_PORT = 8883
 ```
 
-`localhost` in Wokwi is not the developer's Mac, and Docker service names such
-as `mosquitto` are not reachable from Wokwi. Do not assume that a Mac LAN IP is
-reachable from Wokwi. A secure, approved, externally reachable MQTT endpoint
-with authentication and TLS must be selected before changing these settings.
-Do not expose the current anonymous local Mosquitto broker publicly and do not
-switch to a public broker without explicit approval.
+Wokwi browser simulations cannot reach Docker service names or the developer's
+`localhost`. Direct cloud MQTT is the intended path, but it is not proven until
+the simulation connects with the locally configured device password and the
+backend receives a telemetry message. If the Serial Monitor reports a
+connection failure, stop there and diagnose Wokwi/EMQX access or authorization;
+do not silently switch to the local anonymous Mosquitto broker or add a relay.
 
 When offline, the firmware still performs local median filtering, threshold
 evaluation, and LED alerts. No broker or networking configuration is changed by
