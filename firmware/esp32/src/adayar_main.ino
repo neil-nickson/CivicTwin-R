@@ -111,6 +111,7 @@ const int   FILTER_READINGS    = 5;
 
 unsigned long lastReadTime    = 0;
 unsigned long lastStatusTime  = 0;
+unsigned long lastMqttReconnectAttempt = 0;
 unsigned long sequence        = 0;
 bool          mqttConnected   = false;
 String        currentAlert    = "normal";
@@ -127,6 +128,11 @@ int readRainSensorRaw() {
 }
 
 void connectMQTT() {
+    if (WiFi.status() != WL_CONNECTED) {
+        mqttConnected = false;
+        return;
+    }
+
     if (mqttClient.connected()) {
         mqttConnected = true;
         return;
@@ -260,11 +266,12 @@ void publishTelemetry(float distance, float waterLevel, float waterPct, const ch
             Serial.printf("[TX] seq=%lu level=%.1fcm (%.1f%%) rain=%.1f%% status=%s\n",
                           sequence, waterLevel, waterPct, rainPct, sensorStatus);
         } else {
-            Serial.println("[TX] Publish failed");
+            Serial.printf("[TX] Publish failed (mqtt_state=%d)\n", mqttClient.state());
         }
     } else {
-        Serial.printf("[OFFLINE] seq=%lu level=%.1fcm (%.1f%%) rain=%.1f%% status=%s\n",
-                      sequence, waterLevel, waterPct, rainPct, sensorStatus);
+        Serial.printf("[OFFLINE] seq=%lu level=%.1fcm (%.1f%%) rain=%.1f%% status=%s (mqtt_state=%d wifi=%d)\n",
+                      sequence, waterLevel, waterPct, rainPct, sensorStatus,
+                      mqttClient.state(), WiFi.status() == WL_CONNECTED);
     }
 }
 
@@ -281,9 +288,15 @@ void publishAlert(const char* level, float waterPct) {
     serializeJson(doc, payload, sizeof(payload));
 
     if (mqttConnected && mqttClient.connected()) {
-        if (!mqttClient.publish(TOPIC_ALERTS, payload)) {
-            Serial.println("[TX] Alert publish failed");
+        bool sent = mqttClient.publish(TOPIC_ALERTS, payload);
+        if (sent) {
+            Serial.printf("[TX] Alert published: %s\n", level);
+        } else {
+            Serial.printf("[TX] Alert publish failed (mqtt_state=%d)\n", mqttClient.state());
         }
+    } else {
+        Serial.printf("[TX] Alert publish skipped (mqtt_state=%d wifi=%d)\n",
+                      mqttClient.state(), WiFi.status() == WL_CONNECTED);
     }
     Serial.printf("[ALERT] %s: water level at %.1f%%\n", level, waterPct);
 }
@@ -332,17 +345,26 @@ void setup() {
 
 void loop() {
     unsigned long now = millis();
+    bool wifiConnected = WiFi.status() == WL_CONNECTED;
 
-    if (WiFi.status() != WL_CONNECTED) {
+    if (!wifiConnected) {
         connectWiFi();
+        wifiConnected = WiFi.status() == WL_CONNECTED;
     }
-    if (!mqttClient.connected()) {
+
+    if (!wifiConnected) {
         mqttConnected = false;
-        if (now - lastReadTime > RECONNECT_DELAY_MS) {
+    } else if (!mqttClient.connected()) {
+        mqttConnected = false;
+
+        if (now - lastMqttReconnectAttempt >= RECONNECT_DELAY_MS) {
+            lastMqttReconnectAttempt = now;
             connectMQTT();
         }
     }
+
     mqttClient.loop();
+    mqttConnected = wifiConnected && mqttClient.connected();
 
     if (now - lastReadTime >= READ_INTERVAL_MS) {
         lastReadTime = now;
@@ -395,9 +417,15 @@ void loop() {
         serializeJson(doc, payload, sizeof(payload));
 
         if (mqttConnected && mqttClient.connected()) {
-            if (!mqttClient.publish(TOPIC_STATUS, payload)) {
-                Serial.println("[TX] Status publish failed");
+            bool sent = mqttClient.publish(TOPIC_STATUS, payload);
+            if (sent) {
+                Serial.println("[TX] Status published");
+            } else {
+                Serial.printf("[TX] Status publish failed (mqtt_state=%d)\n", mqttClient.state());
             }
+        } else {
+            Serial.printf("[TX] Status publish skipped (mqtt_state=%d wifi=%d)\n",
+                          mqttClient.state(), WiFi.status() == WL_CONNECTED);
         }
         Serial.printf("[STATUS] uptime=%lus seq=%lu alert=%s heap=%u\n",
                       millis() / 1000, sequence, currentAlert.c_str(), ESP.getFreeHeap());
