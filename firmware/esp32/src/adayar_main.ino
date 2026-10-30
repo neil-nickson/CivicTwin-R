@@ -35,7 +35,7 @@ const char* MQTT_BROKER = "wfde4d21.ala.asia-southeast1.emqxsl.com";
 const int   MQTT_PORT = 8883;
 const char* MQTT_USER = "civictwin_device";
 // Replace locally with the dedicated EMQX device password. Never commit it.
-const char* MQTT_PASS = "qttULk9QdXmUvnE";
+const char* MQTT_PASS = ".replace";
 const char* MQTT_CLIENT_ID = "civictwin_adyar_01";
 // DigiCert Global Root G2, which signs the EMQX Cloud endpoint certificate.
 // Do not replace this with setInsecure() or disable certificate validation.
